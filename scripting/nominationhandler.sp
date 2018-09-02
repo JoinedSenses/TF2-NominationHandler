@@ -249,6 +249,12 @@ int GroupList_MenuHandler (Menu menu, MenuAction action, int param1, int param2)
 // ------------------------------------ Internal Functions
 
 void AttemptNominate(int client, const char[] mapName) {
+	char unused[MAX_MAP_LENGTH];
+	if (FindMap(mapName, unused, sizeof(unused)) == FindMap_NotFound) {
+		ReplyToCommand(client, "\x01[\x03ECJS\x01] %s in mapcycle, but not on server. Please report this error.", mapName);
+		return;
+	}
+
 	NominateResult result = NominateMap(mapName, true, client);
 	
 	if (result == Nominate_AlreadyInVote) {
