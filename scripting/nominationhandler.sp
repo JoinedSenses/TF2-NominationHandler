@@ -10,20 +10,19 @@
 #include <sourcemod>
 #include <mapchooser>
 
-static KeyValues
+KeyValues
 	// Stores map file as a keyvalues object.
 	g_kvMaps;
-static ArrayList
+ArrayList
 	// ArrayList containing full list of maps excluding current map
 	g_arrMapCycle
 	// ArrayList containing each map group arraylist
 	, g_arrMapGroups
 	// ArrayList storing map group names
-	, g_arrGroupNames;
-ArrayList
+	, g_arrGroupNames
 	// ArrayList per map group
-	g_arrMapGroup; 
-static StringMap
+	, g_arrMapGroup; 
+StringMap
 	// StringMap containing map group names as strings and an index value for retrieval
 	g_smMapGroupIndexes; 
 
@@ -42,23 +41,19 @@ public void OnPluginStart() {
 
 	RegConsoleCmd("sm_nom", cmdNominate);
 	RegConsoleCmd("sm_nominate", cmdNominate);
+	RegAdminCmd("sm_updatemaplist", cmdUpdateMapList, ADMFLAG_ROOT);
 
-	if (g_kvMaps == null) {
-		g_kvMaps = new KeyValues("MapList");
-		g_kvMaps.ImportFromFile("cfg/sourcemod/maphandler/ecj_mapcycle.txt");
-	}
-	if (g_arrMapGroups == null) {
-		g_arrMapGroups = new ArrayList(ByteCountToCells(PLATFORM_MAX_PATH));
-	}
-	if (g_arrMapCycle == null) {
-		g_arrMapCycle = new ArrayList(ByteCountToCells(MAX_MAP_LENGTH));
-	}
-	if (g_arrGroupNames == null) {
-		g_arrGroupNames = new ArrayList(ByteCountToCells(MAX_MAP_LENGTH));
-	}
-	if (g_smMapGroupIndexes == null) {
-		g_smMapGroupIndexes = new StringMap();
-	}
+	g_kvMaps = new KeyValues("MapList");
+	g_kvMaps.ImportFromFile("cfg/sourcemod/maphandler/ecj_mapcycle.txt");
+
+	g_arrMapGroups = new ArrayList(ByteCountToCells(PLATFORM_MAX_PATH));
+
+	g_arrMapCycle = new ArrayList(ByteCountToCells(MAX_MAP_LENGTH));
+
+	g_arrGroupNames = new ArrayList(ByteCountToCells(MAX_MAP_LENGTH));
+
+	g_smMapGroupIndexes = new StringMap();
+
 
 	LoadMapCycle();
 }
@@ -83,10 +78,6 @@ bool LoadMapCycle() {
 	// groupValue will be used for indexing groups and recalling them
 	int groupValue = 0;
 
-#if MAPFILE_UPDATE
-	File file = OpenFile("cfg/mapcycle.txt", "w");
-#endif
-
 	// Jump into the first subsection
 	if (!g_kvMaps.GotoFirstSubKey()) {
 		delete g_kvMaps;
@@ -110,12 +101,6 @@ bool LoadMapCycle() {
 			// Add each map from the keyvalues to MapCycle and each group
 			g_arrMapCycle.PushString(buffer);
 			g_arrMapGroup.PushString(buffer);
-
-#if MAPFILE_UPDATE
-			char mapName[MAX_MAP_LENGTH];
-			Format(mapName, sizeof(mapName), "%s\n", buffer);
-			file.WriteString(mapName, true);
-#endif
 		} while (g_kvMaps.GotoNextKey(false));
 
 		groupValue++;
@@ -125,9 +110,6 @@ bool LoadMapCycle() {
 
 	} while (g_kvMaps.GotoNextKey());
 
-#if MAPFILE_UPDATE
-	delete file;
-#endif
 	delete g_kvMaps;
 	return true;
 }
@@ -182,6 +164,32 @@ public Action cmdNominate(int client, int args) {
 
 	delete results;
 
+	return Plugin_Handled;
+}
+
+// ------------------------------------ Admin
+
+// Updates mapcycle.txt with maps from ecj_mapcycle.txt
+public Action cmdUpdateMapList(int client, int args) {
+	if (!g_arrMapCycle.Length) {
+		ReplyToCommand(client, "\x01[\x03ECJS\x01] Error reading map cycle. (Array Length: %i)", g_arrMapCycle.Length);
+		return Plugin_Handled;
+	}
+	File file = OpenFile("cfg/mapcycle.txt", "w");
+
+	if (file == null) {
+		ReplyToCommand(client, "\x01[\x03ECJS\x01] Error opening file.");
+		return Plugin_Handled;
+	}
+
+	char mapName[MAX_MAP_LENGTH];
+	for (int i = 0; i < g_arrMapCycle.Length; i++) {
+		g_arrMapCycle.GetString(i, mapName, sizeof(mapName));
+		Format(mapName, sizeof(mapName), "%s\n", mapName);
+		file.WriteString(mapName, true);
+	}
+	delete file;
+	ReplyToCommand(client, "\x01[\x03ECJS\x01] Success! mapcycle.txt updated.");
 	return Plugin_Handled;
 }
 
