@@ -19,9 +19,7 @@ ArrayList
 	// ArrayList containing each map group arraylist
 	, g_arrMapGroups
 	// ArrayList storing map group names
-	, g_arrGroupNames
-	// ArrayList per map group
-	, g_arrMapGroup; 
+	, g_arrGroupNames;
 StringMap
 	// StringMap containing map group names as strings and an index value for retrieval
 	g_smMapGroupIndexes; 
@@ -83,9 +81,10 @@ bool LoadMapCycle() {
 		delete g_kvMaps;
 		return false;
 	}
+	ArrayList mapGroup;
 	// Iterate over subsections at the same nesting level
 	do {
-		g_arrMapGroup = new ArrayList(ByteCountToCells(32));
+		mapGroup = new ArrayList(ByteCountToCells(32));
 		g_kvMaps.GetSectionName(buffer, sizeof(buffer));
 		g_arrGroupNames.PushString(buffer);
 		g_smMapGroupIndexes.SetValue(buffer, groupValue);
@@ -100,13 +99,13 @@ bool LoadMapCycle() {
 			g_kvMaps.GetString(NULL_STRING, buffer, sizeof(buffer));
 			// Add each map from the keyvalues to MapCycle and each group
 			g_arrMapCycle.PushString(buffer);
-			g_arrMapGroup.PushString(buffer);
+			mapGroup.PushString(buffer);
 		} while (g_kvMaps.GotoNextKey(false));
 
 		groupValue++;
 		g_kvMaps.GoBack();
 		// Add map group arraylist to a global reference arraylist
-		g_arrMapGroups.Push(g_arrMapGroup);
+		g_arrMapGroups.Push(mapGroup);
 
 	} while (g_kvMaps.GotoNextKey());
 
@@ -215,7 +214,7 @@ void DisplayMapsFromGroup(int client, ArrayList arrMapGroup, const char[] groupN
 int NominationGroups_MenuHandler(Menu menu, MenuAction action, int param1, int param2) {
 	switch (action) {
 		case MenuAction_Select: {
-			ArrayList arrMapGroup;
+			ArrayList mapGroup;
 			char mapGroupName[MAX_MAP_LENGTH];
 			int mapGroupIndex;
 			// Grab the group name via the selection
@@ -223,10 +222,10 @@ int NominationGroups_MenuHandler(Menu menu, MenuAction action, int param1, int p
 			// Get the group index and store in mapGroupIndex
 			g_smMapGroupIndexes.GetValue(mapGroupName, mapGroupIndex);
 			// Get the group handle by index from global group arraylist
-			arrMapGroup = g_arrMapGroups.Get(mapGroupIndex);
+			mapGroup = g_arrMapGroups.Get(mapGroupIndex);
 
 			// Create new menu
-			DisplayMapsFromGroup(param1, arrMapGroup, mapGroupName);
+			DisplayMapsFromGroup(param1, mapGroup, mapGroupName);
 		}
 		case MenuAction_End: {
 			delete menu;
