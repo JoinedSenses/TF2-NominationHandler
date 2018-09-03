@@ -1,11 +1,9 @@
 #pragma newdecls required
 #pragma semicolon 1
 
-#define PLUGIN_VERSION "0.1"
+#define PLUGIN_VERSION "0.2"
 #define MAX_MAP_LENGTH 96
 #define MATCHED_INDEXES_MAX 10
-// When set to 1, this will update mapcycle.txt with whatever is in the ecj_mapcycle
-#define MAPFILE_UPDATE 0 
 
 #include <sourcemod>
 #include <mapchooser>
@@ -16,13 +14,11 @@ KeyValues
 ArrayList
 	// ArrayList containing full list of maps excluding current map
 	g_arrMapCycle
-	// ArrayList containing each map group arraylist
-	, g_arrMapGroups
-	// ArrayList storing map group names
-	, g_arrGroupNames;
+	// ArrayList containing map group names for retrieving arraylists from the map group stringmap
+	, g_arrMapGroupNames;
 StringMap
-	// StringMap containing map group names as strings and an index value for retrieval
-	g_smMapGroupIndexes; 
+	// StringMap containing map group names as strings and ArrayLists of each group {"GroupName", ArrayList}
+	g_smMapGroups; 
 
 public Plugin myinfo = {
 	name = "[ECJS] Simple Nomination Handler",
@@ -43,38 +39,18 @@ public void OnPluginStart() {
 
 	g_kvMaps = new KeyValues("MapList");
 	g_kvMaps.ImportFromFile("cfg/sourcemod/maphandler/ecj_mapcycle.txt");
-
-	g_arrMapGroups = new ArrayList(ByteCountToCells(PLATFORM_MAX_PATH));
-
 	g_arrMapCycle = new ArrayList(ByteCountToCells(MAX_MAP_LENGTH));
-
-	g_arrGroupNames = new ArrayList(ByteCountToCells(MAX_MAP_LENGTH));
-
-	g_smMapGroupIndexes = new StringMap();
-
+	g_arrMapGroupNames = new ArrayList(ByteCountToCells(128));
+	g_smMapGroups = new StringMap();
 
 	LoadMapCycle();
-}
-
-public void OnPluginEnd() {
-	// Memory management
-	delete g_kvMaps;
-	ArrayList buffer;
-	for (int i = 0; i < g_arrMapGroups.Length; i++) {
-		buffer = g_arrMapGroups.Get(i);
-		delete buffer;
-	}
-	delete g_arrMapGroups;
-	delete g_arrGroupNames;
-	delete g_smMapGroupIndexes;
 }
 
 // ------------------------------------ Map Loader
 
 bool LoadMapCycle() {
-	char buffer[MAX_MAP_LENGTH];
-	// groupValue will be used for indexing groups and recalling them
-	int groupValue = 0;
+	char sectionName[128];
+	char mapName[MAX_MAP_LENGTH];
 
 	// Jump into the first subsection
 	if (!g_kvMaps.GotoFirstSubKey()) {
@@ -85,10 +61,7 @@ bool LoadMapCycle() {
 	// Iterate over subsections at the same nesting level
 	do {
 		mapGroup = new ArrayList(ByteCountToCells(32));
-		g_kvMaps.GetSectionName(buffer, sizeof(buffer));
-		g_arrGroupNames.PushString(buffer);
-		g_smMapGroupIndexes.SetValue(buffer, groupValue);
-		//g_arrMapGroups.PushString(buffer);
+		g_kvMaps.GetSectionName(sectionName, sizeof(sectionName));
 
 		// Iterate through subsection and begin getting key values of map names
 		if (!g_kvMaps.GotoFirstSubKey(false)) {
@@ -96,16 +69,16 @@ bool LoadMapCycle() {
 			return false;
 		}
 		do {
-			g_kvMaps.GetString(NULL_STRING, buffer, sizeof(buffer));
-			// Add each map from the keyvalues to MapCycle and each group
-			g_arrMapCycle.PushString(buffer);
-			mapGroup.PushString(buffer);
+			g_kvMaps.GetString(NULL_STRING, mapName, sizeof(mapName));
+			// Add each map from the keyvalues to MapCycle and each group arraylist
+			g_arrMapCycle.PushString(mapName);
+			mapGroup.PushString(mapName);
 		} while (g_kvMaps.GotoNextKey(false));
 
-		groupValue++;
 		g_kvMaps.GoBack();
-		// Add map group arraylist to a global reference arraylist
-		g_arrMapGroups.Push(mapGroup);
+		// Push section name to array list for future reference and add mapgroup arraylist to global stringmap
+		g_arrMapGroupNames.PushString(sectionName);
+		g_smMapGroups.SetValue(sectionName, mapGroup);
 
 	} while (g_kvMaps.GotoNextKey());
 
@@ -118,27 +91,28 @@ bool LoadMapCycle() {
 public Action cmdNominate(int client, int args) {
 	// Display menu when 0 args
 	if (args == 0) {
-		char buffer[MAX_MAP_LENGTH];
-		Menu menu = new Menu(NominationGroups_MenuHandler);
+		char mapGroupName[MAX_MAP_LENGTH];
+		Menu menu = new Menu(GroupList_MenuHandler);
 		menu.SetTitle("Nomination Menu");
 
-		for (int i = 0; i < g_arrGroupNames.Length; i++) {
+		for (int i = 0; i < g_arrMapGroupNames.Length; i++) {
 			// Add and display each map group
-			g_arrGroupNames.GetString(i, buffer, sizeof(buffer));
-			menu.AddItem(buffer, buffer);
+			g_arrMapGroupNames.GetString(i, mapGroupName, sizeof(mapGroupName));
+			menu.AddItem(mapGroupName, mapGroupName);
 		}
 
 		menu.Display(client, MENU_TIME_FOREVER);
 		return Plugin_Handled;
 	}
 
-	char arg[MAX_MAP_LENGTH], buffer[MAX_MAP_LENGTH];
-	GetCmdArg(1, arg, sizeof(arg));
+	char input[MAX_MAP_LENGTH];
+	char mapResult[MAX_MAP_LENGTH];
+	GetCmdArg(1, input, sizeof(input));
 
-	// Run a fuzzy search on mapcycle arraylist and return count
 	// Results contains the indexes of the results within the map cycle arraylist
 	ArrayList results = new ArrayList();
-	int matches = FindMatchingMaps(g_arrMapCycle, results, arg);
+	int matches = FindMatchingMaps(g_arrMapCycle, results, input);
+	
 
 	// No results
 	if (matches <= 0) {
@@ -150,15 +124,15 @@ public Action cmdNominate(int client, int args) {
 		ReplyToCommand(client, "\x01[\x03ECJS\x01] Found multiple matches");
 
 		for (int i = 0; i < results.Length; i++) {
-			g_arrMapCycle.GetString(results.Get(i), buffer, sizeof(buffer));
-			ReplyToCommand(client, "\x01Map:\x03 %s", buffer);
+			g_arrMapCycle.GetString(results.Get(i), mapResult, sizeof(mapResult));
+			ReplyToCommand(client, "\x01Map:\x03 %s", mapResult);
 		}
 	}
 	// One result
 	else if (matches == 1) {
 		// Get the result and nominate it
-		g_arrMapCycle.GetString(results.Get(0), buffer, sizeof(buffer));
-		AttemptNominate(client, buffer);
+		g_arrMapCycle.GetString(results.Get(0), mapResult, sizeof(mapResult));
+		AttemptNominate(client, mapResult);
 	}
 
 	delete results;
@@ -195,7 +169,7 @@ public Action cmdUpdateMapList(int client, int args) {
 // ------------------------------------ Internal Menus
 
 void DisplayMapsFromGroup(int client, ArrayList arrMapGroup, const char[] groupName) {
-	Menu menu = new Menu(GroupList_MenuHandler);
+	Menu menu = new Menu(MapList_MenuHandler);
 	menu.SetTitle("%s Maps", groupName);
 	menu.ExitBackButton = true;
 	char buffer[MAX_MAP_LENGTH];
@@ -211,19 +185,16 @@ void DisplayMapsFromGroup(int client, ArrayList arrMapGroup, const char[] groupN
 
 // ------------------------------------ Menu Handlers
 
-int NominationGroups_MenuHandler(Menu menu, MenuAction action, int param1, int param2) {
+int GroupList_MenuHandler(Menu menu, MenuAction action, int param1, int param2) {
 	switch (action) {
 		case MenuAction_Select: {
 			ArrayList mapGroup;
 			char mapGroupName[MAX_MAP_LENGTH];
-			int mapGroupIndex;
+
 			// Grab the group name via the selection
 			menu.GetItem(param2, mapGroupName, sizeof(mapGroupName));
-			// Get the group index and store in mapGroupIndex
-			g_smMapGroupIndexes.GetValue(mapGroupName, mapGroupIndex);
-			// Get the group handle by index from global group arraylist
-			mapGroup = g_arrMapGroups.Get(mapGroupIndex);
-
+			// Get the group arraylist by name string from the stringmap
+			g_smMapGroups.GetValue(mapGroupName, mapGroup);
 			// Create new menu
 			DisplayMapsFromGroup(param1, mapGroup, mapGroupName);
 		}
@@ -233,7 +204,7 @@ int NominationGroups_MenuHandler(Menu menu, MenuAction action, int param1, int p
 	}
 }
 
-int GroupList_MenuHandler (Menu menu, MenuAction action, int param1, int param2) {
+int MapList_MenuHandler(Menu menu, MenuAction action, int param1, int param2) {
 	switch (action) {
 		case MenuAction_Select: {
 			char buffer[MAX_MAP_LENGTH];
@@ -288,8 +259,7 @@ int FindMatchingMaps(ArrayList mapList, ArrayList results, const char[] input){
 
 	for (int i = 0; i < map_count; i++) {
 		mapList.GetString(i, map, sizeof(map));
-
-		if (FuzzyCompare(input, map)) {
+		if (StrContains(map, input) != -1) {
 			results.Push(i);
 			matches++;
 
@@ -300,35 +270,4 @@ int FindMatchingMaps(ArrayList mapList, ArrayList results, const char[] input){
 	}
 
 	return matches;
-}
-
-int FuzzyCompare(const char[] needle, const char[] haystack) {
-	int hlen = strlen(haystack);
-	int nlen = strlen(needle);
-
-	if (nlen > hlen) {
-		return false;
-	}
-	if (nlen == hlen) {
-		return strcmp(needle, haystack) == 0;
-	}
-
-	int n = 0;
-	int h = 0;
-	int p = 0;
-
-	for (; n < nlen; n++) {
-		int nch = needle[n];
-
-		while (h < hlen) {
-			if (nch == haystack[h]) {
-				h++;
-				p++;
-				break;
-			}
-			h++;
-		}
-	}
-
-	return (p == nlen);
 }
