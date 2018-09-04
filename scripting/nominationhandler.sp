@@ -1,9 +1,9 @@
 #pragma newdecls required
 #pragma semicolon 1
 
-#define PLUGIN_VERSION "0.2"
+#define PLUGIN_VERSION "0.3"
 #define MAX_MAP_LENGTH 96
-#define MATCHED_INDEXES_MAX 10
+#define MATCHED_INDEXES_MAX 14
 
 #include <sourcemod>
 #include <mapchooser>
@@ -43,10 +43,15 @@ public void OnPluginStart() {
 	g_arrMapGroupNames = new ArrayList(ByteCountToCells(128));
 	g_smMapGroups = new StringMap();
 
-	LoadMapCycle();
+	// 10 second timer for loading map cycle to spread out server workload
+	CreateTimer(10.0, timerLoadMapCycle);
 }
 
 // ------------------------------------ Map Loader
+
+Action timerLoadMapCycle(Handle timer) {
+	LoadMapCycle();
+}
 
 bool LoadMapCycle() {
 	char sectionName[128];
@@ -113,7 +118,6 @@ public Action cmdNominate(int client, int args) {
 	ArrayList results = new ArrayList();
 	int matches = FindMatchingMaps(g_arrMapCycle, results, input);
 	
-
 	// No results
 	if (matches <= 0) {
 		ReplyToCommand(client, "\x01[\x03ECJS\x01] No nomination match");
@@ -121,12 +125,16 @@ public Action cmdNominate(int client, int args) {
 	// Multiple results
 	else if (matches > 1) {
 		// Display results to the client and end
-		ReplyToCommand(client, "\x01[\x03ECJS\x01] Found multiple matches");
-
+		Menu menu = new Menu(MapList_MenuHandler);
+		menu.SetTitle("Select map");
+		
 		for (int i = 0; i < results.Length; i++) {
 			g_arrMapCycle.GetString(results.Get(i), mapResult, sizeof(mapResult));
-			ReplyToCommand(client, "\x01Map:\x03 %s", mapResult);
+			menu.AddItem(mapResult, mapResult);
 		}
+
+		menu.Display(client, MENU_TIME_FOREVER);
+		ReplyToCommand(client, "\x01[\x03ECJS\x01] Found multiple matches");
 	}
 	// One result
 	else if (matches == 1) {
@@ -172,12 +180,12 @@ void DisplayMapsFromGroup(int client, ArrayList arrMapGroup, const char[] groupN
 	Menu menu = new Menu(MapList_MenuHandler);
 	menu.SetTitle("%s Maps", groupName);
 	menu.ExitBackButton = true;
-	char buffer[MAX_MAP_LENGTH];
+	char mapName[MAX_MAP_LENGTH];
 
 	for (int i = 0; i < arrMapGroup.Length; i++) {
 		// Display all maps from group
-		arrMapGroup.GetString(i, buffer, sizeof(buffer));
-		menu.AddItem(buffer, buffer);
+		arrMapGroup.GetString(i, mapName, sizeof(mapName));
+		menu.AddItem(mapName, mapName);
 	}
 
 	menu.Display(client, MENU_TIME_FOREVER);
@@ -207,12 +215,12 @@ int GroupList_MenuHandler(Menu menu, MenuAction action, int param1, int param2) 
 int MapList_MenuHandler(Menu menu, MenuAction action, int param1, int param2) {
 	switch (action) {
 		case MenuAction_Select: {
-			char buffer[MAX_MAP_LENGTH];
+			char mapName[MAX_MAP_LENGTH];
 			// Get the map name and attempt to nominate it
-			menu.GetItem(param2, buffer, sizeof(buffer));
-			AttemptNominate(param1, buffer);
+			menu.GetItem(param2, mapName, sizeof(mapName));
+			AttemptNominate(param1, mapName);
 		}
-		case MenuAction_Cancel:{
+		case MenuAction_Cancel: {
 			if (param2 == MenuCancel_ExitBack){
 				// Return to previous menu if selection == exitback
 				cmdNominate(param1, 0);
