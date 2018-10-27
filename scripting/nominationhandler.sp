@@ -31,7 +31,7 @@ public Plugin myinfo = {
 // ------------------------------------ SM Forwards
 
 public void OnPluginStart() {
-	CreateConVar("sm_nominationhandler_version", PLUGIN_VERSION, "ECJS Nomination Handler",  FCVAR_NOTIFY | FCVAR_DONTRECORD);
+	CreateConVar("sm_nominationhandler_version", PLUGIN_VERSION, "ECJS Nomination Handler",  FCVAR_NOTIFY|FCVAR_DONTRECORD);
 
 	RegConsoleCmd("sm_nom", cmdNominate);
 	RegConsoleCmd("sm_nominate", cmdNominate);
@@ -94,19 +94,9 @@ bool LoadMapCycle() {
 // ------------------------------------ Public
 
 public Action cmdNominate(int client, int args) {
-	// Display menu when 0 args
+	// Display main menu when 0 args
 	if (args == 0) {
-		char mapGroupName[MAX_MAP_LENGTH];
-		Menu menu = new Menu(GroupList_MenuHandler);
-		menu.SetTitle("Nomination Menu");
-
-		for (int i = 0; i < g_arrMapGroupNames.Length; i++) {
-			// Add and display each map group
-			g_arrMapGroupNames.GetString(i, mapGroupName, sizeof(mapGroupName));
-			menu.AddItem(mapGroupName, mapGroupName);
-		}
-
-		menu.Display(client, MENU_TIME_FOREVER);
+		DisplayMapGroups(client);
 		return Plugin_Handled;
 	}
 
@@ -125,7 +115,7 @@ public Action cmdNominate(int client, int args) {
 	// Multiple results
 	else if (matches > 1) {
 		// Display results to the client and end
-		Menu menu = new Menu(MapList_MenuHandler);
+		Menu menu = new Menu(MapList_MenuHandler, MENU_ACTIONS_DEFAULT|MenuAction_DrawItem|MenuAction_DisplayItem);
 		menu.SetTitle("Select map");
 		
 		for (int i = 0; i < results.Length; i++) {
@@ -175,9 +165,22 @@ public Action cmdUpdateMapList(int client, int args) {
 }
 
 // ------------------------------------ Internal Menus
+void DisplayMapGroups(int client) {
+	char mapGroupName[MAX_MAP_LENGTH];
+	Menu menu = new Menu(GroupList_MenuHandler);
+	menu.SetTitle("Nomination Menu");
+
+	for (int i = 0; i < g_arrMapGroupNames.Length; i++) {
+		// Add and display each map group
+		g_arrMapGroupNames.GetString(i, mapGroupName, sizeof(mapGroupName));
+		menu.AddItem(mapGroupName, mapGroupName);
+	}
+
+	menu.Display(client, MENU_TIME_FOREVER);
+}
 
 void DisplayMapsFromGroup(int client, ArrayList arrMapGroup, const char[] groupName) {
-	Menu menu = new Menu(MapList_MenuHandler);
+	Menu menu = new Menu(MapList_MenuHandler, MENU_ACTIONS_DEFAULT|MenuAction_DrawItem|MenuAction_DisplayItem);
 	menu.SetTitle("%s Maps", groupName);
 	menu.ExitBackButton = true;
 	char mapName[MAX_MAP_LENGTH];
@@ -214,6 +217,28 @@ int GroupList_MenuHandler(Menu menu, MenuAction action, int param1, int param2) 
 
 int MapList_MenuHandler(Menu menu, MenuAction action, int param1, int param2) {
 	switch (action) {
+		case MenuAction_DisplayItem: {
+			char mapName[MAX_MAP_LENGTH];
+			menu.GetItem(param2, mapName, sizeof(mapName));
+			char currentMap[MAX_MAP_LENGTH];
+			GetCurrentMap(currentMap, sizeof(currentMap));
+			if (StrEqual(mapName, currentMap)) {
+				char display[150];
+				Format(display, sizeof(display), "%s (Current)", mapName);
+				return RedrawMenuItem(display);
+			}
+		}
+		case MenuAction_DrawItem: {
+			char mapName[MAX_MAP_LENGTH];
+			menu.GetItem(param2, mapName, sizeof(mapName));
+			char currentMap[MAX_MAP_LENGTH];
+			GetCurrentMap(currentMap, sizeof(currentMap));
+			if (StrEqual(mapName, currentMap)) {
+				return ITEMDRAW_DISABLED;
+			}
+
+			return ITEMDRAW_DEFAULT;
+		}
 		case MenuAction_Select: {
 			char mapName[MAX_MAP_LENGTH];
 			// Get the map name and attempt to nominate it
@@ -223,13 +248,14 @@ int MapList_MenuHandler(Menu menu, MenuAction action, int param1, int param2) {
 		case MenuAction_Cancel: {
 			if (param2 == MenuCancel_ExitBack){
 				// Return to previous menu if selection == exitback
-				cmdNominate(param1, 0);
+				DisplayMapGroups(param1);
 			}
 		}
 		case MenuAction_End: {
 			delete menu;
 		}
 	}
+	return 0;
 }
 
 // ------------------------------------ Internal Functions
