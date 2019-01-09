@@ -38,7 +38,7 @@ public void OnPluginStart() {
 	RegAdminCmd("sm_updatemaplist", cmdUpdateMapList, ADMFLAG_ROOT);
 
 	g_kvMaps = new KeyValues("MapList");
-	g_kvMaps.ImportFromFile("cfg/sourcemod/maphandler/ecj_mapcycle.txt");
+	g_kvMaps.ImportFromFile("cfg/sourcemod/maphandler/_mapcycle.txt");
 	g_arrMapCycle = new ArrayList(ByteCountToCells(MAX_MAP_LENGTH));
 	g_arrMapGroupNames = new ArrayList(ByteCountToCells(128));
 	g_smMapGroups = new StringMap();
@@ -156,8 +156,7 @@ public Action cmdUpdateMapList(int client, int args) {
 	char mapName[MAX_MAP_LENGTH];
 	for (int i = 0; i < g_arrMapCycle.Length; i++) {
 		g_arrMapCycle.GetString(i, mapName, sizeof(mapName));
-		Format(mapName, sizeof(mapName), "%s\n", mapName);
-		file.WriteString(mapName, true);
+		file.WriteLine(mapName);
 	}
 	delete file;
 	ReplyToCommand(client, "\x01[\x03ECJS\x01] Success! mapcycle.txt updated.");
