@@ -2,49 +2,51 @@
 #pragma semicolon 1
 
 #define PLUGIN_VERSION "0.3"
+#define PLUGIN_DESCRIPTION "A simple nomination handler"
 #define MAX_MAP_LENGTH 96
 #define MATCHED_INDEXES_MAX 14
+#define MAPFILE "cfg/sourcemod/maphandler/_mapcycle.txt"
 
 #include <sourcemod>
 #include <mapchooser>
 
 KeyValues
 	// Stores map file as a keyvalues object.
-	g_kvMaps;
+	  g_kvMaps;
 ArrayList
 	// ArrayList containing full list of maps excluding current map
-	g_arrMapCycle
+	  g_arrMapCycle
 	// ArrayList containing map group names for retrieving arraylists from the map group stringmap
 	, g_arrMapGroupNames;
 StringMap
 	// StringMap containing map group names as strings and ArrayLists of each group {"GroupName", ArrayList}
-	g_smMapGroups; 
+	  g_smMapGroups;
+bool
+	  g_bLate;
 
 public Plugin myinfo = {
 	name = "[ECJS] Simple Nomination Handler",
 	author = "JoinedSenses",
-	description = "A simple nomination handler",
+	description = PLUGIN_DESCRIPTION,
 	version = PLUGIN_VERSION,
 	url = "https://github.com/JoinedSenses"
 };
 
 // ------------------------------------ SM Forwards
 
+public APLRes AskPluginLoad2(Handle myself, bool late, char[] error, int err_max) {
+	g_bLate = late;
+}
+
 public void OnPluginStart() {
-	CreateConVar("sm_nominationhandler_version", PLUGIN_VERSION, "ECJS Nomination Handler",  FCVAR_NOTIFY|FCVAR_DONTRECORD);
+	CreateConVar("sm_nominationhandler_version", PLUGIN_VERSION, PLUGIN_DESCRIPTION,  FCVAR_SPONLY|FCVAR_NOTIFY|FCVAR_DONTRECORD);
 
 	RegConsoleCmd("sm_nom", cmdNominate);
 	RegConsoleCmd("sm_nominate", cmdNominate);
 	RegAdminCmd("sm_updatemaplist", cmdUpdateMapList, ADMFLAG_ROOT);
 
-	g_kvMaps = new KeyValues("MapList");
-	g_kvMaps.ImportFromFile("cfg/sourcemod/maphandler/_mapcycle.txt");
-	g_arrMapCycle = new ArrayList(ByteCountToCells(MAX_MAP_LENGTH));
-	g_arrMapGroupNames = new ArrayList(ByteCountToCells(128));
-	g_smMapGroups = new StringMap();
-
 	// 10 second timer for loading map cycle to spread out server workload
-	CreateTimer(10.0, timerLoadMapCycle);
+	CreateTimer(g_bLate ? 0.1 : 10.0, timerLoadMapCycle);
 }
 
 // ------------------------------------ Map Loader
@@ -54,6 +56,17 @@ Action timerLoadMapCycle(Handle timer) {
 }
 
 bool LoadMapCycle() {
+	delete g_kvMaps;
+	delete g_arrMapCycle;
+	delete g_arrMapGroupNames;
+	delete g_smMapGroups;
+
+	g_kvMaps = new KeyValues("MapList");
+	g_kvMaps.ImportFromFile(MAPFILE);
+	g_arrMapCycle = new ArrayList(ByteCountToCells(MAX_MAP_LENGTH));
+	g_arrMapGroupNames = new ArrayList(ByteCountToCells(128));
+	g_smMapGroups = new StringMap();
+
 	char sectionName[128];
 	char mapName[MAX_MAP_LENGTH];
 
@@ -62,6 +75,7 @@ bool LoadMapCycle() {
 		delete g_kvMaps;
 		return false;
 	}
+
 	ArrayList mapGroup;
 	// Iterate over subsections at the same nesting level
 	do {
@@ -73,6 +87,7 @@ bool LoadMapCycle() {
 			delete g_kvMaps;
 			return false;
 		}
+
 		do {
 			g_kvMaps.GetString(NULL_STRING, mapName, sizeof(mapName));
 			// Add each map from the keyvalues to MapCycle and each group arraylist
@@ -84,7 +99,6 @@ bool LoadMapCycle() {
 		// Push section name to array list for future reference and add mapgroup arraylist to global stringmap
 		g_arrMapGroupNames.PushString(sectionName);
 		g_smMapGroups.SetValue(sectionName, mapGroup);
-
 	} while (g_kvMaps.GotoNextKey());
 
 	delete g_kvMaps;
@@ -101,13 +115,13 @@ public Action cmdNominate(int client, int args) {
 	}
 
 	char input[MAX_MAP_LENGTH];
-	char mapResult[MAX_MAP_LENGTH];
 	GetCmdArg(1, input, sizeof(input));
 
 	// Results contains the indexes of the results within the map cycle arraylist
 	ArrayList results = new ArrayList();
 	int matches = FindMatchingMaps(g_arrMapCycle, results, input);
-	
+
+	char mapResult[MAX_MAP_LENGTH];
 	// No results
 	if (matches <= 0) {
 		ReplyToCommand(client, "\x01[\x03ECJS\x01] No nomination match");
@@ -142,12 +156,14 @@ public Action cmdNominate(int client, int args) {
 
 // Updates mapcycle.txt with maps from ecj_mapcycle.txt
 public Action cmdUpdateMapList(int client, int args) {
+	LoadMapCycle();
+
 	if (!g_arrMapCycle.Length) {
 		ReplyToCommand(client, "\x01[\x03ECJS\x01] Error reading map cycle. (Array Length: %i)", g_arrMapCycle.Length);
 		return Plugin_Handled;
 	}
-	File file = OpenFile("cfg/mapcycle.txt", "w");
 
+	File file = OpenFile("cfg/mapcycle.txt", "w");
 	if (file == null) {
 		ReplyToCommand(client, "\x01[\x03ECJS\x01] Error opening file.");
 		return Plugin_Handled;
@@ -158,6 +174,7 @@ public Action cmdUpdateMapList(int client, int args) {
 		g_arrMapCycle.GetString(i, mapName, sizeof(mapName));
 		file.WriteLine(mapName);
 	}
+
 	delete file;
 	ReplyToCommand(client, "\x01[\x03ECJS\x01] Success! mapcycle.txt updated.");
 	return Plugin_Handled;
@@ -219,19 +236,23 @@ int MapList_MenuHandler(Menu menu, MenuAction action, int param1, int param2) {
 		case MenuAction_DisplayItem: {
 			char mapName[MAX_MAP_LENGTH];
 			menu.GetItem(param2, mapName, sizeof(mapName));
+
 			char currentMap[MAX_MAP_LENGTH];
 			GetCurrentMap(currentMap, sizeof(currentMap));
+
 			if (StrEqual(mapName, currentMap)) {
 				char display[150];
-				Format(display, sizeof(display), "%s (Current)", mapName);
+				FormatEx(display, sizeof(display), "%s (Current)", mapName);
 				return RedrawMenuItem(display);
 			}
 		}
 		case MenuAction_DrawItem: {
 			char mapName[MAX_MAP_LENGTH];
 			menu.GetItem(param2, mapName, sizeof(mapName));
+
 			char currentMap[MAX_MAP_LENGTH];
 			GetCurrentMap(currentMap, sizeof(currentMap));
+
 			if (StrEqual(mapName, currentMap)) {
 				return ITEMDRAW_DISABLED;
 			}
@@ -254,6 +275,7 @@ int MapList_MenuHandler(Menu menu, MenuAction action, int param1, int param2) {
 			delete menu;
 		}
 	}
+
 	return 0;
 }
 
@@ -276,8 +298,6 @@ void AttemptNominate(int client, const char[] mapName) {
 	char name[MAX_NAME_LENGTH];
 	GetClientName(client, name, sizeof(name));
 	PrintToChatAll("\x01[\x03ECJS\x01]\x03 %s\x01 has nominated\x03 %s\x01.", name, mapName);
-		
-	return;
 }
 
 int FindMatchingMaps(ArrayList mapList, ArrayList results, const char[] input){
